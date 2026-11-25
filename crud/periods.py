@@ -23,16 +23,107 @@ async def get_periods(db:AsyncSession,mode:str,major_version:int|None = None,ski
     periods = await db.execute(stem)
     count = await db.execute(count_stmt)
     total = count.scalar()
-    return {"total":total,"items": [
-    {
-        **period.__dict__,
-        "version": period.version
-    }
-    for period in periods.scalars().all()
-],
-            "page":(skip//limit)+1,
-            "page_size":limit,
+    return {
+        "total": total,
+        "items": [
+            {
+                **period.__dict__,
+                "version": period.version,
+                "monsters": [
+                    {
+                        "id": monster.id,
+                        "name": monster.name,
+                        "hp": monster.hp,
+                        "room": monster.room,
+                        "floor": monster.floor,
+                        "note": monster.note,
+                        "weakness": [
+                            w.element for w in monster.weaknesses
+                        ]
+                    }
+                    for monster in period.monsters
+                ]
             }
+            for period in periods.scalars().all()
+        ],
+        "page": (skip // limit) + 1,
+        "page_size": limit
+    }
+
+async def get_period_id(db:AsyncSession,id:str):
+    stmt = select(Period).options(
+        selectinload(Period.monsters).selectinload(Monster.weaknesses),
+        selectinload(Period.rewards)
+    ).where(Period.id == id)
+    period = await db.execute(stmt)
+    period =period.scalar_one_or_none()
+    if period is None:
+        return None
+    return {
+            "id": id,
+            "mode": period.mode,
+            "major_version": period.major_version,
+            "half": period.half,
+            "version": f"{period.major_version}.{period.minor_version}",
+            "rewards": period.rewards,
+            "monsters":[{
+        "id": monster.id,
+        "name": monster.name,
+        "hp": monster.hp,
+        "room": monster.room,
+        "floor": monster.floor,
+        "note": monster.note,
+        "weakness": [
+            w.element for w in monster.weaknesses
+        ]
+    }
+    for monster in period.monsters
+],
+            "start_time": period.start_time,
+            "end_time": period.end_time,
+            "total_hp": period.total_hp,
+        }
+
+async def get_latests(db:AsyncSession):
+    modes = [
+        "forgotten",
+        "fiction",
+        "apocalypse",
+        "arbitration"
+    ]
+    item=[]
+    for mode in modes:
+        stmt = select(Period).options(
+            selectinload(Period.monsters).selectinload(Monster.weaknesses),
+            selectinload(Period.rewards)
+        ).where(Period.mode == mode).order_by(Period.start_time.desc()).limit(1)
+        period = await db.execute(stmt)
+        period = period.scalar_one_or_none()
+        item.append({
+            "id": period.id,
+            "mode": period.mode,
+            "major_version": period.major_version,
+            "half": period.half,
+            "version": f"{period.major_version}.{period.minor_version}",
+            "rewards": period.rewards,
+            "monsters": [{
+                "id": monster.id,
+                "name": monster.name,
+                "hp": monster.hp,
+                "room": monster.room,
+                "floor": monster.floor,
+                "note": monster.note,
+                "weakness": [
+                    w.element for w in monster.weaknesses
+                ]
+            }
+                for monster in period.monsters
+            ],
+            "start_time": period.start_time,
+            "end_time": period.end_time,
+            "total_hp": period.total_hp,
+        })
+    return item
 
 
 
