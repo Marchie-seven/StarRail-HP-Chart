@@ -1,12 +1,21 @@
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select, func
 from models.periods import Period
 from config.star import AsyncSession
 from sqlalchemy.orm import selectinload
 from models.monsters import Monster
+from cache.periods_cache import get_period_list, set_period_list, get_period_latest, set_period_latest, get_periods_id, \
+    set_periods_id
+
 
 async def get_periods(db:AsyncSession,mode:str,major_version:int|None = None,skip:int = 0,limit:int = 10,
                       version:str|None = None,half:str|None = None,
                       ):
+    result = await get_period_list(mode,major_version,version,half,(skip // limit) + 1,limit)
+    if result is not None:
+        print("Redis缓存命中")
+        return result
+    print("redis缓存未命中")
     stmt = select(Period).options(
         selectinload(Period.monsters).selectinload(Monster.weaknesses),
         selectinload(Period.rewards)
@@ -23,7 +32,7 @@ async def get_periods(db:AsyncSession,mode:str,major_version:int|None = None,ski
     periods = await db.execute(stem)
     count = await db.execute(count_stmt)
     total = count.scalar()
-    return {
+    result = {
         "total": total,
         "items": [
             {
@@ -50,7 +59,15 @@ async def get_periods(db:AsyncSession,mode:str,major_version:int|None = None,ski
         "page_size": limit
     }
 
+    result=jsonable_encoder(result)
+    await set_period_list(mode,major_version,version,half,(skip // limit) + 1,limit,result)
+    return result
+
+
 async def get_period_id(db:AsyncSession,id:str):
+    result = await get_periods_id(id)
+    if result is not None:
+        return result
     stmt = select(Period).options(
         selectinload(Period.monsters).selectinload(Monster.weaknesses),
         selectinload(Period.rewards)
@@ -59,7 +76,7 @@ async def get_period_id(db:AsyncSession,id:str):
     period =period.scalar_one_or_none()
     if period is None:
         return None
-    return {
+    result = {
             "id": id,
             "mode": period.mode,
             "major_version": period.major_version,
@@ -83,8 +100,16 @@ async def get_period_id(db:AsyncSession,id:str):
             "end_time": period.end_time,
             "total_hp": period.total_hp,
         }
+    result=jsonable_encoder(result)
+    await set_periods_id(id,result)
+    return result
+
+
 
 async def get_latests(db:AsyncSession):
+    result = await get_period_latest()
+    if result is not None:
+        return result
     modes = [
         "forgotten",
         "fiction",
@@ -123,6 +148,8 @@ async def get_latests(db:AsyncSession):
             "end_time": period.end_time,
             "total_hp": period.total_hp,
         })
+    item=jsonable_encoder(item)
+    await set_period_latest(item)
     return item
 
 
